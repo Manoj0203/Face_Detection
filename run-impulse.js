@@ -1,199 +1,65 @@
-// Classifier module
-let classifierInitialized = false;
-Module.onRuntimeInitialized = function() {
-    classifierInitialized = true;
-};
-
 let bluetoothChar;
+const classifier = new EdgeImpulseClassifier();
 
+// 1. Bluetooth Connection (Triggered by Button Click)
 async function connectESP32() {
-  // Filters to find your specific ESP32 BLE device
-  const device = await navigator.bluetooth.requestDevice({
-    filters: [{ name: 'ESP32_AI_Display' }],
-    optionalServices: ['4fafc201-1fb5-459e-8fcc-c5c9c331914b']
-  });
-  
-  const server = await device.gatt.connect();
-  const service = await server.getPrimaryService('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
-  bluetoothChar = await service.getCharacteristic('beb5483e-36e1-4688-b7f5-ea07361b26a8');
-  console.log("Connected to ESP32!");
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ name: 'ESP32_AI_Display' }],
+      optionalServices: ['4fafc201-1fb5-459e-8fcc-c5c9c331914b']
+    });
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
+    bluetoothChar = await service.getCharacteristic('beb5483e-36e1-4688-b7f5-ea07361b26a8');
+    document.getElementById('results').textContent = "Connected to ESP32!";
+  } catch (err) { console.error("Bluetooth Error:", err); }
 }
 
-// Inside your classification loop:
-if (result.label === 'Manoj' && result.value > 0.8) {
-  let encoder = new TextEncoder();
-  await bluetoothChar.writeValue(encoder.encode("Manoj"));
+// 2. Start Camera and AI Loop
+async function startAttendance() {
+    await classifier.init();
+    const video = document.getElementById('video');
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    video.srcObject = stream;
+    
+    // Start continuous detection
+    detectFrame();
 }
 
-// Add this function to your run-impulse.js file
-async function runAutoDetection(classifier, videoElement) {
-    const resultsDiv = document.getElementById('results');
+async function detectFrame() {
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Capture 320x320 frame for classification
+    ctx.drawImage(video, 0, 0, 320, 320);
+    const imgData = ctx.getImageData(0, 0, 320, 320).data;
+    
+    // Convert RGB pixels for Edge Impulse
+    const pixels = [];
+    for (let i = 0; i < imgData.length; i += 4) {
+        pixels.push(imgData[i], imgData[i+1], imgData[i+2]);
+    }
 
-    async function detect() {
-        // 1. Get image data from video (Simplified)
-        // Note: Real implementation needs a Canvas to get pixel data
-        const rawData = getPixelsFromVideo(videoElement); 
+    const res = classifier.classify(pixels);
+    
+    // Find "Manoj" in results
+    const manoj = res.results.find(r => r.label === 'Manoj');
+
+    if (manoj && manoj.value > 0.8) {
+        document.getElementById('results').textContent = `Manoj Detected (${(manoj.value * 100).toFixed(1)}%)`;
         
-        // 2. Classify
-        const result = classifier.classify(rawData);
-        resultsDiv.textContent = JSON.stringify(result.results);
-
-        // 3. AUTOMATIC TRIGGER: If Manoj is seen, send to ESP32
-        for (let r of result.results) {
-            if (r.label === 'Manoj' && r.value > 0.8) {
-                if (bluetoothChar) {
-                    let encoder = new TextEncoder();
-                    await bluetoothChar.writeValue(encoder.encode("Manoj"));
-                    console.log("Automatically sent 'Manoj' to ESP32!");
-                }
-            }
+        // Automated Send via Web Bluetooth
+        if (bluetoothChar) {
+            let encoder = new TextEncoder();
+            await bluetoothChar.writeValue(encoder.encode("Manoj"));
         }
-        requestAnimationFrame(detect); // Keep running the loop
+    } else {
+        document.getElementById('results').textContent = "Scanning...";
     }
-    detect();
+
+    requestAnimationFrame(detectFrame); // Loop forever
 }
 
-class EdgeImpulseClassifier {
-    _initialized = false;
-
-    init() {
-        if (classifierInitialized === true) return Promise.resolve();
-
-        return new Promise((resolve, reject) => {
-            Module.onRuntimeInitialized = () => {
-                classifierInitialized = true;
-                let ret = Module.init();
-                if (typeof ret === 'number' && ret != 0) {
-                    return reject('init() failed with code ' + ret);
-                }
-                resolve();
-            };
-        });
-    }
-
-    getProjectInfo() {
-        if (!classifierInitialized) throw new Error('Module is not initialized');
-        return this._convertToOrdinaryJsObject(Module.get_project(), Module.emcc_classification_project_t.prototype);
-    }
-
-    classify(rawData, debug = false) {
-        if (!classifierInitialized) throw new Error('Module is not initialized');
-
-        const obj = this._arrayToHeap(rawData);
-        let ret = Module.run_classifier(obj.buffer.byteOffset, rawData.length, debug);
-        Module._free(obj.ptr);
-
-        if (ret.result !== 0) {
-            throw new Error('Classification failed (err code: ' + ret.result + ')');
-        }
-
-        return this._fillResultStruct(ret);
-    }
-
-    classifyContinuous(rawData, enablePerfCal = true) {
-        if (!classifierInitialized) throw new Error('Module is not initialized');
-
-        const obj = this._arrayToHeap(rawData);
-        let ret = Module.run_classifier_continuous(obj.buffer.byteOffset, rawData.length, false, enablePerfCal);
-        Module._free(obj.ptr);
-
-        if (ret.result !== 0) {
-            throw new Error('Classification failed (err code: ' + ret.result + ')');
-        }
-
-        return this._fillResultStruct(ret);
-    }
-
-    getProperties() {
-        if (!classifierInitialized) throw new Error('Module is not initialized');
-        return this._convertToOrdinaryJsObject(Module.get_properties(), Module.emcc_classification_properties_t.prototype);
-    }
-
-    /**
-     * Override the threshold on a learn block (you can find thresholds via getProperties().thresholds)
-     * @param {*} obj, e.g. { id: 16, min_score: 0.2 } to set min. object detection threshold to 0.2 for block ID 16
-     */
-    setThreshold(obj) {
-        const ret = Module.set_threshold(obj);
-        if (!ret.success) {
-            throw new Error(ret.error);
-        }
-    }
-
-    _arrayToHeap(data) {
-        let typedArray = new Float32Array(data);
-        let numBytes = typedArray.length * typedArray.BYTES_PER_ELEMENT;
-        let ptr = Module._malloc(numBytes);
-        let heapBytes = new Uint8Array(Module.HEAPU8.buffer, ptr, numBytes);
-        heapBytes.set(new Uint8Array(typedArray.buffer));
-        return { ptr: ptr, buffer: heapBytes };
-    }
-
-    _convertToOrdinaryJsObject(emboundObj, prototype) {
-        let newObj = { };
-        for (const key of Object.getOwnPropertyNames(prototype)) {
-            const descriptor = Object.getOwnPropertyDescriptor(prototype, key);
-
-            if (descriptor && typeof descriptor.get === 'function') {
-                newObj[key] = emboundObj[key]; // Evaluates the getter and assigns as an own property.
-            }
-        }
-        return newObj;
-    }
-
-    _fillResultStruct(ret) {
-        let props = Module.get_properties();
-
-        let jsResult = {
-            anomaly: ret.anomaly,
-            results: []
-        };
-
-        for (let cx = 0; cx < ret.size(); cx++) {
-            let c = ret.get(cx);
-            if (props.model_type === 'object_detection' || props.model_type === 'constrained_object_detection') {
-                jsResult.results.push({ label: c.label, value: c.value, x: c.x, y: c.y, width: c.width, height: c.height });
-            }
-            else {
-                jsResult.results.push({ label: c.label, value: c.value });
-            }
-            c.delete();
-        }
-
-        if (props.has_object_tracking) {
-            jsResult.object_tracking_results = [];
-            for (let cx = 0; cx < ret.object_tracking_size(); cx++) {
-                let c = ret.object_tracking_get(cx);
-                jsResult.object_tracking_results.push({ object_id: c.object_id, label: c.label, value: c.value, x: c.x, y: c.y, width: c.width, height: c.height });
-                c.delete();
-            }
-        }
-
-        if (props.has_visual_anomaly_detection) {
-            jsResult.visual_ad_max = ret.visual_ad_max;
-            jsResult.visual_ad_mean = ret.visual_ad_mean;
-            jsResult.visual_ad_grid_cells = [];
-            for (let cx = 0; cx < ret.visual_ad_grid_cells_size(); cx++) {
-                let c = ret.visual_ad_grid_cells_get(cx);
-                jsResult.visual_ad_grid_cells.push({ label: c.label, value: c.value, x: c.x, y: c.y, width: c.width, height: c.height });
-                c.delete();
-            }
-        }
-
-        if (ret.freeform) {
-            jsResult.freeform = [];
-            for (let ix = 0; ix < ret.freeform.size(); ix++) {
-                let arr = [];
-                const tensor = ret.freeform.get(ix);
-                for (let jx = 0; jx < tensor.size(); jx++) {
-                    arr.push(tensor.get(jx));
-                }
-                jsResult.freeform.push(arr);
-            }
-        }
-
-        ret.delete();
-
-        return jsResult;
-    }
-}
+// Add the original EdgeImpulseClassifier class you provided below...
+// [Paste your existing EdgeImpulseClassifier class here]
