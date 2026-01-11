@@ -1,53 +1,26 @@
 <!DOCTYPE html>
 <html>
-<head>
-    <meta charset="utf-8">
-    <title>Browser inference demo</title>
-
-    <style>
-        #features {
-            width: 50%;
-            font-size: 18px;
-        }
-
-        #results {
-            font-family: monospace;
-            white-space: pre;
-        }
-    </style>
-</head>
 <body>
-    <h1></h1>
-
-    <p>
-        <input type="text" id="features" placeholder="Paste your features here">
-    </p>
-    <p>
-        <button id="run-inference">Run inference</button>
-    </p>
-    <p id="results"></p>
+    <h1>Manoj's Attendance System</h1>
+    <button id="connect-btn" onclick="connectESP32()">1. Connect to ESP32</button>
+    <button id="start-btn">2. Start Camera</button>
+    <hr>
+    <video id="video" width="320" height="320" autoplay></video>
+    <p id="results">Waiting for detection...</p>
 
     <script src="edge-impulse-standalone.js"></script>
     <script src="run-impulse.js"></script>
     <script>
-        (async () => {
-            var classifier = new EdgeImpulseClassifier();
+        document.getElementById('start-btn').onclick = async () => {
+            const video = document.getElementById('video');
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            
+            // Start the automatic classification loop
+            const classifier = new EdgeImpulseClassifier();
             await classifier.init();
-
-            let project = classifier.getProjectInfo();
-            document.querySelector('h1').textContent = project.owner + ' / ' + project.name + ' (version ' + project.deploy_version + ')';
-
-            document.querySelector('#run-inference').onclick = () => {
-                try {
-                    let features = document.querySelector('#features').value.split(',').map(x => Number(x.trim()));
-                    let res = classifier.classify(features);
-                    document.querySelector('#results').textContent = JSON.stringify(res, null, 4);
-                }
-                catch (ex) {
-                    alert('Failed to classify: ' + (ex.message || ex.toString()));
-                }
-            };
-        })();
+            runAutoDetection(classifier, video);
+        };
     </script>
 </body>
 </html>

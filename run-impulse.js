@@ -4,6 +4,55 @@ Module.onRuntimeInitialized = function() {
     classifierInitialized = true;
 };
 
+let bluetoothChar;
+
+async function connectESP32() {
+  // Filters to find your specific ESP32 BLE device
+  const device = await navigator.bluetooth.requestDevice({
+    filters: [{ name: 'ESP32_AI_Display' }],
+    optionalServices: ['4fafc201-1fb5-459e-8fcc-c5c9c331914b']
+  });
+  
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
+  bluetoothChar = await service.getCharacteristic('beb5483e-36e1-4688-b7f5-ea07361b26a8');
+  console.log("Connected to ESP32!");
+}
+
+// Inside your classification loop:
+if (result.label === 'Manoj' && result.value > 0.8) {
+  let encoder = new TextEncoder();
+  await bluetoothChar.writeValue(encoder.encode("Manoj"));
+}
+
+// Add this function to your run-impulse.js file
+async function runAutoDetection(classifier, videoElement) {
+    const resultsDiv = document.getElementById('results');
+
+    async function detect() {
+        // 1. Get image data from video (Simplified)
+        // Note: Real implementation needs a Canvas to get pixel data
+        const rawData = getPixelsFromVideo(videoElement); 
+        
+        // 2. Classify
+        const result = classifier.classify(rawData);
+        resultsDiv.textContent = JSON.stringify(result.results);
+
+        // 3. AUTOMATIC TRIGGER: If Manoj is seen, send to ESP32
+        for (let r of result.results) {
+            if (r.label === 'Manoj' && r.value > 0.8) {
+                if (bluetoothChar) {
+                    let encoder = new TextEncoder();
+                    await bluetoothChar.writeValue(encoder.encode("Manoj"));
+                    console.log("Automatically sent 'Manoj' to ESP32!");
+                }
+            }
+        }
+        requestAnimationFrame(detect); // Keep running the loop
+    }
+    detect();
+}
+
 class EdgeImpulseClassifier {
     _initialized = false;
 
