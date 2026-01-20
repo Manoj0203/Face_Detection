@@ -1,26 +1,27 @@
 <!DOCTYPE html>
 <html>
+<head>
+    <meta charset="utf-8">
+    <title>Manoj AI Attendance</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; }
+        #video { border: 2px solid #333; border-radius: 10px; }
+        #results { font-size: 24px; font-weight: bold; color: blue; }
+    </style>
+</head>
 <body>
-    <h1>Attendance System</h1>
-    <button id="connect-btn" onclick="connectESP32()">1. Connect to ESP32</button>
-    <button id="start-btn">2. Start Camera</button>
+    <h1>Face Attendance System</h1>
+    
+    <button id="start-btn" style="padding:15px; font-size:18px;">Start Camera & AI</button>
     <hr>
-    <video id="video" width="320" height="320" autoplay></video>
-    <p id="results">Waiting for detection...</p>
+    
+    <video id="video" width="320" height="320" autoplay playsinline></video>
+    
+    <canvas id="canvas" width="320" height="320" style="display:none;"></canvas>
+    
+    <p id="results">Status: Waiting to start...</p>
 
     <script src="edge-impulse-standalone.js"></script>
     <script src="run-impulse.js"></script>
-    <script>
-        document.getElementById('start-btn').onclick = async () => {
-            const video = document.getElementById('video');
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            video.srcObject = stream;
-            
-            // Start the automatic classification loop
-            const classifier = new EdgeImpulseClassifier();
-            await classifier.init();
-            runAutoDetection(classifier, video);
-        };
-    </script>
 </body>
 </html>
